@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Post Mortem - 이화여고 특별판</title>
+    <style>
+        :root {
+            --bg-color: #0b0c10;
+            --card-color: #1f2833;
+            --neon-blue: #46a29f;
+            --neon-cyan: #66fcf1;
+            --text-color: #c5c6c7;
+            --pure-white: #ffffff;
+            --penalty-red: #ff4d4d;
+            --money-gold: #ffd700;
+            --success-green: #2ecc71;
+            --main-font: 'Malgun Gothic', sans-serif;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: var(--main-font); }
+        body { background-color: var(--bg-color); color: var(--text-color); overflow: hidden; height: 100vh; display: flex; justify-content: center; align-items: center; }
+
+        /* 공통 씬 제어 */
+        .scene { display: none; width: 100%; height: 100vh; flex-direction: column; justify-content: center; align-items: center; padding: 20px; text-align: center; box-sizing: border-box; position: relative; z-index: 1; }
+        .scene.active { display: flex !important; animation: fadeIn 0.5s ease-in-out; }
+
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* 공통 버튼 */
+        button { background-color: transparent; border: 2px solid var(--neon-cyan); color: var(--neon-cyan); padding: 12px 30px; font-size: 16px; font-weight: bold; cursor: pointer; border-radius: 5px; transition: all 0.3s ease; margin-top: 20px; text-transform: uppercase; letter-spacing: 1px; position: relative; z-index: 10; }
+        button:hover { background-color: var(--neon-cyan); color: var(--bg-color); box-shadow: 0 0 15px var(--neon-cyan); }
+
+        #scene-title { background: radial-gradient(circle, #15202b 0%, #0b0c10 100%); }
+        #scene-title::before { content: ""; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(45deg, transparent 45%, rgba(102, 252, 241, 0.05) 50%, transparent 55%); background-size: 200% 200%; animation: tapeMove 6s linear infinite; pointer-events: none; z-index: 2; }
+        @keyframes tapeMove { 0% { background-position: 0% 0%; } 100% { background-position: 200% 200%; } }
+        .title-logo { font-size: 64px; font-weight: 900; color: var(--neon-cyan); text-shadow: 0 0 20px rgba(102, 252, 241, 0.6); letter-spacing: 5px; margin-bottom: 10px; z-index: 3; }
+        .title-sub { font-size: 18px; color: var(--neon-blue); margin-bottom: 40px; letter-spacing: 2px; z-index: 3; }
+        .btn-group { display: flex; gap: 20px; z-index: 3; }
+
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; z-index: 200; }
+        .modal-content { background: var(--card-color); border: 2px solid var(--neon-blue); padding: 30px; border-radius: 10px; max-width: 500px; text-align: left; }
+        .modal-content h3 { color: var(--neon-cyan); margin-bottom: 15px; }
+        .modal-content ul { margin-left: 20px; margin-bottom: 20px; line-height: 1.6; }
+
+        .id-card { background: var(--card-color); border: 3px double var(--neon-blue); padding: 40px; border-radius: 15px; box-shadow: 0 0 25px rgba(0,0,0,0.5); width: 400px; z-index: 5; }
+        .id-card h2 { color: var(--neon-cyan); margin-bottom: 20px; font-size: 20px; }
+        .id-card input { width: 100%; padding: 12px; background: #0b0c10; border: 1px solid var(--neon-blue); color: var(--pure-white); font-size: 16px; border-radius: 5px; text-align: center; outline: none; margin-bottom: 10px; position: relative; z-index: 10; }
+        .id-card input:focus { border-color: var(--neon-cyan); box-shadow: 0 0 10px var(--neon-blue); }
+
+        .briefing-box { background: #1a1a24; border-left: 5px solid var(--neon-cyan); padding: 30px; text-align: left; max-width: 650px; border-radius: 0 10px 10px 0; box-shadow: 0 5px 15px rgba(0,0,0,0.3); z-index: 5; }
+        .briefing-box h2 { color: var(--neon-cyan); margin-bottom: 20px; font-size: 24px; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        .briefing-line { margin-bottom: 12px; font-size: 16px; line-height: 1.6; opacity: 0; transform: translateY(10px); animation: slideUpFade 0.5s forwards; }
+        @keyframes slideUpFade { to { opacity: 1; transform: translateY(0); } }
+
+        /* 핵심 게임 화면 (1600x900 고정 규격) */
+        #scene-investigation { width: 1600px; height: 900px; max-width: 100%; max-height: 100%; padding: 20px; flex-direction: row; justify-content: space-between; align-items: stretch; margin: auto; }
+        .game-main { flex: 1; display: flex; flex-direction: column; height: 100%; padding-right: 20px; }
+        .game-header { display: flex; justify-content: space-between; background: var(--card-color); padding: 15px 25px; border-radius: 8px; border: 1px solid #333; margin-bottom: 20px; z-index: 5; }
+        .info-badge { font-size: 18px; color: var(--neon-cyan); font-weight: bold; }
+        
+        .crime-scene-map { flex: 1; background: #11141a; border: 2px dashed #3a4750; border-radius: 10px; display: flex; justify-content: center; align-items: center; padding: 0; position: relative; overflow: hidden; }
+        
+        .evidence-zone { width: 100%; height: 100%; display: none; flex-direction: column; justify-content: center; align-items: center; position: absolute; top: 0; left: 0; overflow: hidden; }
+        .evidence-zone.active-zone { display: flex !important; }
+        .evidence-zone.drag-over { border: 4px dashed var(--neon-cyan) !important; background-color: rgba(102, 252, 241, 0.2) !important; }
+        
+        /* 이미지 레이어 마우스 간섭 방지 */
+        .evidence-bg-img { width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none !important; user-select: none !important; }
+        .zone-title { position: absolute; top: 20px; left: 20px; font-size: 18px; color: var(--neon-cyan); font-weight: bold; background: rgba(0,0,0,0.85); padding: 8px 18px; border-radius: 4px; border-left: 4px solid var(--neon-cyan); z-index: 3; pointer-events: none !important; user-select: none !important; }
+
+        .capture-overlay { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(70, 162, 159, 0.25); border: 5px solid var(--neon-cyan); z-index: 4; justify-content: center; align-items: center; flex-direction: column; animation: pulseGlow 0.4s ease-in-out infinite alternate; pointer-events: none; }
+        .capture-text { font-size: 46px; font-weight: 900; color: #fff; text-shadow: 0 0 20px rgba(102, 252, 241, 0.9), 0 0 40px #000; letter-spacing: 4px; }
+        .capture-bonus { font-size: 20px; font-weight: bold; color: var(--money-gold); margin-top: 12px; text-shadow: 0 2px 4px #000; }
+        @keyframes pulseGlow { from { background-color: rgba(70, 162, 159, 0.15); } to { background-color: rgba(102, 252, 241, 0.4); } }
+
+        .sidebar-kit { width: 340px; background: var(--card-color); border: 1px solid #333; border-radius: 10px; padding: 25px; display: flex; flex-direction: column; z-index: 5; }
+        .sidebar-kit h3 { font-size: 20px; color: var(--neon-cyan); margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 10px; text-align: left; }
+        .tools-grid { display: flex; flex-direction: column; gap: 15px; flex: 1; overflow-y: auto; }
+        
+        .tool-card { background: #11141a; border: 1px solid #2d3748; padding: 18px; border-radius: 6px; cursor: grab; user-select: none; transition: all 0.2s ease; text-align: left; position: relative; z-index: 10; }
+        .tool-card:active { cursor: grabbing; transform: scale(0.98); }
+        .tool-card:hover { border-color: var(--neon-cyan); background: #19212d; box-shadow: 0 0 10px rgba(102, 252, 241, 0.3); }
+        .tool-name { font-weight: bold; color: var(--pure-white); font-size: 15px; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; pointer-events: none; }
+        .tool-desc { font-size: 12px; color: #718096; line-height: 1.4; pointer-events: none; }
+
+        .quiz-overlay { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index: 100; justify-content: center; align-items: center; }
+        .quiz-box { background: var(--card-color); border: 2px solid var(--neon-cyan); border-radius: 12px; width: 480px; padding: 30px; box-shadow: 0 0 30px rgba(102, 252, 241, 0.3); text-align: left; }
+        .quiz-tag { background: rgba(102, 252, 241, 0.1); color: var(--neon-cyan); font-size: 12px; font-weight: bold; padding: 4px 8px; border-radius: 4px; display: inline-block; margin-bottom: 12px; }
+        .quiz-question { font-size: 18px; font-weight: bold; color: var(--pure-white); margin-bottom: 20px; line-height: 1.4; }
+        .quiz-options { display: flex; flex-direction: column; gap: 10px; }
+        .option-btn { background: #11141a; border: 1px solid #2d3748; color: var(--text-color); padding: 12px 15px; border-radius: 6px; text-align: left; font-size: 14px; cursor: pointer; transition: all 0.2s; }
+        .option-btn:hover { background: #19212d; border-color: var(--neon-blue); color: var(--pure-white); }
+
+        .penalty-toast { display: none; position: fixed; top: 20px; left: 50%; transform: translateX(-50%); padding: 12px 25px; border-radius: 5px; font-weight: bold; z-index: 500; box-shadow: 0 4px 15px rgba(0,0,0,0.5); pointer-events: none; }
+        .toast-error { background: rgba(255, 77, 77, 0.95); color: white; animation: shake 0.4s ease-in-out; }
+        .toast-success { background: rgba(70, 162, 159, 0.95); color: white; }
+        @keyframes shake { 0%, 100% { transform: translateX(-50%); } 20%, 60% { transform: translateX(-54%); } 40%, 80% { transform: translateX(-46%); } }
+
+        /* 수사 수첩 - 최종 추리 */
+        #scene-deduction { background: #0f111a; padding: 30px 20px; overflow-y: auto; }
+        .deduction-wrapper { display: flex; gap: 25px; width: 1150px; margin-top: 15px; align-items: stretch; justify-content: center; }
+        
+        .deduction-column { background: var(--card-color); border: 1px solid #2d334a; border-radius: 10px; padding: 22px; flex: 1; text-align: left; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        .deduction-column h3 { color: var(--neon-cyan); font-size: 18px; margin-bottom: 12px; border-bottom: 2px solid #3a4266; padding-bottom: 6px; }
+        
+        .deduction-table { width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 10px; }
+        .deduction-table th, .deduction-table td { padding: 10px; border: 1px solid #2d334a; text-align: left; }
+        .deduction-table th { background: rgba(102, 252, 241, 0.08); color: var(--neon-cyan); font-weight: bold; }
+        .deduction-table td { color: var(--text-color); }
+
+        /* 용의자 카드 (우측 PNG 이미지 결합형) */
+        .suspect-card { background: #11141a; border: 1px solid #2d334a; border-radius: 6px; padding: 12px; margin-bottom: 10px; display: flex; align-items: flex-start; gap: 15px; }
+        .suspect-img { width: 80px; height: 80px; object-fit: cover; border-radius: 4px; border: 1px solid #3a4266; }
+        .suspect-info-box { flex: 1; }
+        .suspect-name { font-size: 15px; font-weight: bold; color: var(--money-gold); margin-bottom: 4px; }
+        .suspect-meta { font-size: 13px; color: #a0aec0; list-style-type: square; margin-left: 15px; line-height: 1.4; }
+
+        .final-quiz-box { background: #1a233a; border: 1px solid var(--neon-blue); border-radius: 8px; padding: 15px; margin-top: 10px; text-align: center; }
+        .final-quiz-title { font-size: 15px; font-weight: bold; color: var(--pure-white); margin-bottom: 10px; }
+        .radio-group { display: flex; justify-content: center; gap: 30px; margin-bottom: 10px; }
+        .radio-label { display: flex; align-items: center; gap: 6px; font-size: 16px; font-weight: bold; color: var(--text-color); cursor: pointer; }
+        .radio-label input { width: 18px; height: 18px; accent-color: var(--neon-cyan); cursor: pointer; }
+
+        /* 🎬 사건 해결 최종 엔딩 씬 (왼쪽 텍스트박스, 오른쪽 end.png 구조 배치 고정) */
+        #scene-report { background: radial-gradient(circle, #1a202c 0%, #0a0f1d 100%); flex-direction: row; justify-content: center; align-items: center; gap: 40px; padding: 40px; }
+        .ending-content-left { text-align: left; flex: 1; max-width: 620px; }
+        .ending-box { background: #f4f4f6; color: #1a202c; padding: 40px; box-shadow: 0 15px 40px rgba(0,0,0,0.6); text-align: left; border-top: 12px solid #e53e3e; border-radius: 4px; margin-bottom: 20px; }
+        .ending-title { text-align: center; font-size: 26px; font-weight: 800; letter-spacing: 2px; color: #e53e3e; margin-bottom: 25px; border-bottom: 3px double #1a202c; padding-bottom: 10px; }
+        .ending-script { font-size: 14px; line-height: 1.8; color: #2d3748; margin-bottom: 20px; background: #edf2f7; padding: 20px; border-left: 5px solid #4a5568; border-radius: 0 4px 4px 0; }
+        .ending-script p { margin-bottom: 10px; }
+        .ending-script p:last-child { margin-bottom: 0; }
+        .criminal-tag { font-size: 24px; font-weight: 900; color: #e53e3e; text-align: center; margin-top: 15px; }
+        .success-banner { text-align: center; font-size: 28px; font-weight: 900; color: var(--success-green); margin-top: 15px; text-shadow: 0 0 10px rgba(46,204,113,0.3); }
+        .ending-img-right { flex: 1; max-width: 600px; display: flex; flex-direction: column; align-items: center; }
+        .end-main-img { width: 100%; max-height: 700px; object-fit: contain; border-radius: 8px; border: 4px solid var(--card-color); box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    </style>
+</head>
+<body>
+
+    <div id="penalty-toast" class="penalty-toast"></div>
+
+    <div id="scene-title" class="scene active">
+        <h1 class="title-logo">POST MORTEM</h1>
+        <p class="title-sub">이화여고 특별판: 화학 반응 과학 수사 시뮬레이션</p>
+        <div class="btn-group">
+            <button onclick="changeScene('scene-id')">게임 시작하기</button>
+            <button onclick="toggleGuideline(true)">수사 가이드라인</button>
+        </div>
+    </div>
+
+    <div id="guideline-modal" class="modal">
+        <div class="modal-content">
+            <h3>수사 가이드라인 (도움말)</h3>
+            <ul>
+                <li><strong>드래그 앤 드롭 수사:</strong> 우측 도구함의 장비를 마우스로 드래그해서 왼쪽 사건 현장 지도 매핑 구역에 떨어뜨려 검출을 진행하세요.</li>
+                <li><strong>포인트 연동 머니:</strong> 장비 오용 및 퀴즈 실패 시 <strong>-500p</strong>가 깎이며, 정답 시 <strong>+500p</strong>, 구역 클리어 시 마다 자동 <strong>+10,000p</strong>가 누적됩니다.</li>
+                <li><strong>자동 검거완료 시스템:</strong> 퀴즈를 풀면 화면에 검거 오버레이가 연출되며, 별도 조작 없이 자동으로 다음 구역으로 넘어갑니다.</li>
+            </ul>
+            <button onclick="toggleGuideline(false)" style="margin-top: 0; width: 100%;">닫기</button>
+        </div>
+    </div>
+
+    <div id="scene-id" class="scene">
+        <div class="id-card">
+            <h2>과학수사대(KCSI) 신원 확인</h2>
+            <input type="text" id="investigator-name" placeholder="수사관 이름 입력" maxlength="10">
+            <button onclick="submitInvestigator()" style="width: 100%;">신원 확인 및 현장 투입</button>
+        </div>
+    </div>
+
+    <div id="scene-briefing" class="scene">
+        <div class="briefing-box" id="briefing-content">
+            <h2>CASE BRIEFING: 미반 교실의 비밀</h2>
+        </div>
+        <button id="btn-enter-scene" style="display:none;" onclick="startInvestigation()">현장 입장</button>
+    </div>
+
+    <div id="scene-investigation" class="scene">
+        <div class="game-main">
+            <div class="game-header">
+                <div class="info-badge">수사관: <span id="display-badge-name">홍길동</span></div>
+                <div class="info-badge" style="color: var(--money-gold);">포인트 머니: <span id="display-money-score">0</span>p</div>
+                <div class="info-badge" style="color: var(--neon-cyan);">진행도: <span id="current-stage-num">1</span> / 4</div>
+            </div>
+            
+            <div class="crime-scene-map">
+                <div class="capture-overlay" id="capture-panel">
+                    <div class="capture-text">🚨 구역 조사 완료 🚨</div>
+                    <div class="capture-bonus">+10,000p 단서 분석 수사비 적립!</div>
+                </div>
+
+                <div class="evidence-zone active-zone" id="zone-A" data-target-tool="tool-luminol" ondragover="allowDrop(event)" ondragleave="dragLeave(event)" ondrop="handleDrop(event)">
+                    <img class="evidence-bg-img" id="img-A">
+                    <div class="zone-title">구역 1: 사물함 주변 바닥 [혈흔 수색]</div>
+                </div>
+                <div class="evidence-zone" id="zone-B" data-target-tool="tool-ninhydrin" ondragover="allowDrop(event)" ondragleave="dragLeave(event)" ondrop="handleDrop(event)">
+                    <img class="evidence-bg-img" id="img-B">
+                    <div class="zone-title">구역 2: 교탁 위 종이 유서 [잠재지문 수색]</div>
+                </div>
+                <div class="evidence-zone" id="zone-C" data-target-tool="tool-powder" ondragover="allowDrop(event)" ondragleave="dragLeave(event)" ondrop="handleDrop(event)">
+                    <img class="evidence-bg-img" id="img-C">
+                    <div class="zone-title">구역 3: 교실 뒷문 손잡이 [비흡수 표면 수색]</div>
+                </div>
+                <div class="evidence-zone" id="zone-D" data-target-tool="tool-marquis" ondragover="allowDrop(event)" ondragleave="dragLeave(event)" ondrop="handleDrop(event)">
+                    <img class="evidence-bg-img" id="img-D">
+                    <div class="zone-title">구역 4: 쓰레기통 속 깨진 시약병 [독물 식별]</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="sidebar-kit">
+            <h3>Forensic Kit (도구함)</h3>
+            <div class="tools-grid">
+                <div class="tool-card" id="tool-luminol" draggable="true" ondragstart="handleDragStart(event)">
+                    <div class="tool-name">💧 루미놀 분무기</div>
+                    <div class="tool-desc">혈흔 속 헤모글로빈 감별용 청록색 발광 시약</div>
+                </div>
+                <div class="tool-card" id="tool-ninhydrin" draggable="true" ondragstart="handleDragStart(event)">
+                    <div class="tool-name">🧪 닌히드린 시약</div>
+                    <div class="tool-desc">종이 등 다공성 표면의 아미노산 반응 검출 시약</div>
+                </div>
+                <div class="tool-card" id="tool-powder" draggable="true" ondragstart="handleDragStart(event)">
+                    <div class="tool-name">🖌️ 지문 가루 & 브러시</div>
+                    <div class="tool-desc">금속, 유리 등 비흡수 표면 유분 흡착 분말 기법</div>
+                </div>
+                <div class="tool-card" id="tool-marquis" draggable="true" ondragstart="handleDragStart(event)">
+                    <div class="tool-name">🔬 마르키 간이 시약</div>
+                    <div class="tool-desc">알카로이드 독물 반응 간이 감별 변색 키트</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="quiz-overlay" class="quiz-overlay">
+        <div class="quiz-box">
+            <span class="quiz-tag">현장 분석 과학 퀴즈</span>
+            <div class="quiz-question" id="quiz-question-text">질문 내용</div>
+            <div class="quiz-options" id="quiz-options-box"></div>
+        </div>
+    </div>
+
+    <div id="scene-deduction" class="scene">
+        <h2 style="color: var(--neon-cyan);">🕵️ 수사 수첩 - 최종 추리</h2>
+        <p style="color: #718096; margin-top: 5px;">현장에서 확보된 단서들과 용의자들의 명단을 대조해 보며 범인을 지목하세요.</p>
+        
+        <div class="deduction-wrapper">
+            <div class="deduction-column">
+                <h3>확보된 증거</h3>
+                <table class="deduction-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 30%;">증거</th>
+                            <th style="width: 70%;">분석 결과</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>구역 A 혈흔</strong></td>
+                            <td>범인이 현장을 정리하며 증거를 인멸하려 함</td>
+                        </tr>
+                        <tr>
+                            <td><strong>구역 B 유서</strong></td>
+                            <td>피해자가 작성한 것이 아님. 범인의 지문 검출</td>
+                        </tr>
+                        <tr>
+                            <td><strong>구역 C 교실 뒷문</strong></td>
+                            <td>범인의 지문 검출</td>
+                        </tr>
+                        <tr>
+                            <td><strong>구역 D 시약병</strong></td>
+                            <td>독극물 검출, 피해자의 사인과 일치</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="deduction-column" style="display: flex; flex-direction: column; justify-content: space-between;">
+                <div>
+                    <h3>용의자 명단</h3>
+                    <div class="suspect-card">
+                        <img src="crime1.png" alt="임지아" class="suspect-img">
+                        <div class="suspect-info-box">
+                            <div class="suspect-name">용의자 ① 임지아</div>
+                            <ul class="suspect-meta">
+                                <li>피해자의 같은 반 친구</li>
+                                <li>사건 당일 알리바이 존재</li>
+                                <li>지문 불일치</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="suspect-card">
+                        <img src="crime2.png" alt="이지우" class="suspect-img">
+                        <div class="suspect-info-box">
+                            <div class="suspect-name" style="color: var(--neon-cyan);">용의자 ② 이지우</div>
+                            <ul class="suspect-meta">
+                                <li>피해자의 동아리 후배</li>
+                                <li>최근 불화 발생</li>
+                                <li>유서 및 문 손잡이 지문과 일치</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="suspect-card">
+                        <img src="crime3.png" alt="진채은" class="suspect-img">
+                        <div class="suspect-info-box">
+                            <div class="suspect-name">용의자 ③ 진채은</div>
+                            <ul class="suspect-meta">
+                                <li>사건 당일 타 지역 체류 확인</li>
+                                <li>독극물 입수 기록 없음</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="final-quiz-box">
+                    <div class="final-quiz-title">최종 추리 : 범인은 누구인가?</div>
+                    <div class="radio-group">
+                        <label class="radio-label"><input type="radio" name="final-criminal" value="임지아"> 임지아</label>
+                        <label class="radio-label"><input type="radio" name="final-criminal" value="이지우"> 이지우</label>
+                        <label class="radio-label"><input type="radio" name="final-criminal" value="진채은"> 진채은</label>
+                    </div>
+                    <div class="btn-box">
+                        <button onclick="submitFinalDeduction()" style="margin-top: 5px; width: 100%; padding: 10px;">체크 완료</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="scene-report" class="scene">
+        <div class="ending-content-left">
+            <div class="ending-box">
+                <div class="ending-title">사건 해결</div>
+                <div class="ending-script">
+                    <p>“유서와 교실 뒷문 손잡이에서 발견된 지문이 모두 이지우의 것과 일치했습니다.”</p>
+                    <p>“또한 이지우는 최근 피해자와 심각한 불화를 겪고 있었으며, 피해자를 시기한 범행 동기가 확인되었습니다.”</p>
+                    <p>“독극물이 담긴 시약병에서도 이지우의 흔적이 발견되었습니다.”</p>
+                    <p style="font-weight: 700; margin-top: 15px; border-top: 1px dashed #4a5568; padding-top: 10px;">“모든 증거는 하나의 인물을 가리키고 있습니다.”</p>
+                </div>
+                <div class="criminal-tag">범인: 이지우</div>
+                <div class="success-banner">🎉 사건 해결 성공!</div>
+            </div>
+            <button onclick="restartGame()" style="margin-top: 10px; width: 100%;">다시 수사하기 (처음으로)</button>
+        </div>
+        <div class="ending-img-right">
+            <img src="end.png" alt="사건 해결" class="end-main-img">
+        </div>
+    </div>
+
+    <script>
+        const stageOrder = ['zone-A', 'zone-B', 'zone-C', 'zone-D'];
+        let currentStageIndex = 0;
+        let investigatorName = "홍길동";
+        let currentActiveZone = null;
+        let totalMoneyScore = 0;
+
+        function getStageImageSrc(stageIndex, stateNumber) {
+            return "zone" + (stageIndex + 1) + "-" + stateNumber + ".jpeg";
+        }
+
+        const quizBank = {
+            'zone-A': {
+                q: "루미놀 반응은 혈액 속의 어떤 성분이 촉매 역할을 하여 과산화수소를 분해시켜 청록색 형광 빛을 내는 것일까요?",
+                options: ["백혈구의 면역 세포", "적혈구의 헤모글로빈 철성분", "혈소판의 응고 단백질"],
+                ans: 1
+            },
+            'zone-B': {
+                q: "종이 같은 흡수성 표면에 사용되는 닌히드린은 손가락 지문 속의 '이 성분'과 반응하여 보라색을 띱니다. 무엇일까요?",
+                options: ["지방산 성분", "땀 속 아미노산", "나트륨 무기염류"],
+                ans: 1
+            },
+            'zone-C': {
+                q: "분말법에서 가루(알루미늄/탄소)가 지문 자국에 들러붙을 수 있게 만들어주는 지문 속 잔류 성분은 무엇일까요?",
+                options: ["수분과 지방 성분", "각질 세포 유래 단백질", "철분 및 칼슘 이온"],
+                ans: 0
+            },
+            'zone-D': {
+                q: "마르키 간이 독극물 검사 시약이 특정 알카로이드나 독물 성분과 반응했을 때 관찰되는 주된 현상은 무엇일까요?",
+                options: ["강렬한 기체 발생과 거품", "액체의 투명화 현상", "순식간에 진한 자줏빛이나 검은색으로 변색"],
+                ans: 2
+            }
+        };
+
+        function handleDragStart(event) {
+            event.dataTransfer.setData("text/plain", event.target.id);
+            event.dataTransfer.setData("text", event.target.id);
+        }
+
+        function allowDrop(event) {
+            event.preventDefault();
+            const currentZoneId = stageOrder[currentStageIndex];
+            if (event.currentTarget.id === currentZoneId) {
+                event.currentTarget.classList.add('drag-over');
+            }
+        }
+
+        function dragLeave(event) {
+            event.currentTarget.classList.remove('drag-over');
+        }
+
+        function handleDrop(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            event.currentTarget.classList.remove('drag-over');
+            
+            let draggedToolId = event.dataTransfer.getData("text/plain") || event.dataTransfer.getData("text");
+            const currentZoneId = stageOrder[currentStageIndex];
+            const zone = event.currentTarget;
+
+            if (zone.id !== currentZoneId) return;
+            if (zone.classList.contains('solved')) return;
+
+            const targetToolId = zone.getAttribute('data-target-tool');
+
+            if (draggedToolId === 'tool-powder' && zone.id === 'zone-B') {
+                showToast("❌ 훼손 페널티! 종이에 분말을 쓰면 지문이 파괴됩니다. (-500p)", false);
+                updateMoneyUI(-500);
+                return;
+            }
+            if (draggedToolId === 'tool-ninhydrin' && zone.id === 'zone-C') {
+                showToast("❌ 훼손 페널티! 금속 표면에 닌히드린을 쓰면 지문이 지워집니다. (-500p)", false);
+                updateMoneyUI(-500);
+                return;
+            }
+
+            if(draggedToolId === targetToolId) {
+                currentActiveZone = zone.id;
+                openQuiz(zone.id);
+            } else {
+                showToast("❌ 잘못된 분석 기법입니다. 수사비가 차감됩니다. (-500p)", false);
+                updateMoneyUI(-500);
+            }
+        }
+
+        function updateMoneyUI(amount) {
+            totalMoneyScore += amount;
+            document.getElementById('display-money-score').innerText = totalMoneyScore;
+        }
+
+        function changeScene(sceneId) {
+            document.querySelectorAll('.scene').forEach(s => s.classList.remove('active'));
+            const target = document.getElementById(sceneId);
+            if(target) target.classList.add('active');
+            if (sceneId === 'scene-briefing') startBriefingTyper();
+        }
+
+        function toggleGuideline(show) {
+            document.getElementById('guideline-modal').style.display = show ? 'flex' : 'none';
+        }
+
+        function submitInvestigator() {
+            const nameInput = document.getElementById('investigator-name').value.trim();
+            if(!nameInput) {
+                showToast("수사관의 이름을 정확히 입력해야 현장 진입이 가능합니다.", false);
+                return;
+            }
+            investigatorName = nameInput;
+            document.getElementById('display-badge-name').innerText = investigatorName;
+            changeScene('scene-briefing');
+        }
+
+        function startBriefingTyper() {
+            const briefingBox = document.getElementById('briefing-content');
+            briefingBox.innerHTML = '<h2>CASE BRIEFING: 미반 교실의 비밀</h2>';
+            
+            const lines = [
+                "• 장소: 이화여자고등학교 2학년 미반 교실",
+                "• 상황: ‘임나연‘ 실종 및 다량의 저항 흔적 발견",
+                "• 임무: 현장 곳곳에 숨겨진 단서를 찾아 화학적 증거를 확보하고 범인의 흔적을 찾으십시오."
+            ];
+
+            lines.forEach((line, index) => {
+                const p = document.createElement('p');
+                p.className = 'briefing-line';
+                p.innerText = line;
+                p.style.animationDelay = `${index * 0.8}s`;
+                briefingBox.appendChild(p);
+            });
+
+            setTimeout(() => {
+                document.getElementById('btn-enter-scene').style.display = 'inline-block';
+            }, lines.length * 800 + 200);
+        }
+
+        /* 🛠️ 검은 화면 버그를 막기 위해 초기 수사 전(-1) 이미지를 미리 강제 렌더링하는 핵심 오작동 방지 로직 고정 */
+        function initializeAllImages() {
+            document.getElementById('img-A').src = getStageImageSrc(0, 1);
+            document.getElementById('img-B').src = getStageImageSrc(1, 1);
+            document.getElementById('img-C').src = getStageImageSrc(2, 1);
+            document.getElementById('img-D').src = getStageImageSrc(3, 1);
+        }
+
+        function startInvestigation() {
+            currentStageIndex = 0;
+            totalMoneyScore = 0;
+            document.getElementById('display-money-score').innerText = "0";
+            initializeAllImages(); // 💡 현장 입장할 때 검은 화면이 뜨지 않도록 미리 호출되도록 고정 배치 완료!
+            renderStage();
+            changeScene('scene-investigation');
+        }
+
+        function renderStage() {
+            document.getElementById('current-stage-num').innerText = currentStageIndex + 1;
+            document.querySelectorAll('.evidence-zone').forEach(z => z.classList.remove('active-zone'));
+
+            const currentZoneId = stageOrder[currentStageIndex];
+            document.getElementById(currentZoneId).classList.add('active-zone');
+        }
+
+        function autoProgressNextStage() {
+            const overlay = document.getElementById('capture-panel');
+            overlay.style.display = 'flex';
+            updateMoneyUI(10000);
+
+            setTimeout(() => {
+                overlay.style.display = 'none';
+                if (currentStageIndex < stageOrder.length - 1) {
+                    currentStageIndex++;
+                    renderStage();
+                } else {
+                    changeScene('scene-deduction');
+                }
+            }, 1500);
+        }
+
+        function showToast(message, isSuccess) {
+            const toast = document.getElementById('penalty-toast');
+            toast.innerText = message;
+            toast.className = "penalty-toast " + (isSuccess ? "toast-success" : "toast-error");
+            toast.style.display = 'block';
+            setTimeout(() => { toast.style.display = 'none'; }, 3000);
+        }
+
+        function openQuiz(zoneId) {
+            const quizData = quizBank[zoneId];
+            document.getElementById('quiz-question-text').innerText = quizData.q;
+            const optionsBox = document.getElementById('quiz-options-box');
+            optionsBox.innerHTML = '';
+            
+            quizData.options.forEach((opt, idx) => {
+                const btn = document.createElement('button');
+                btn.className = 'option-btn';
+                btn.innerText = `${idx + 1}) ${opt}`;
+                btn.onclick = () => checkQuizAnswer(idx, quizData.ans);
+                optionsBox.appendChild(btn);
+            });
+
+            document.getElementById('quiz-overlay').style.display = 'flex';
+        }
+
+        function checkQuizAnswer(selected, correct) {
+            document.getElementById('quiz-overlay').style.display = 'none';
+            
+            if(selected === correct) {
+                showToast("✅ 정답! 수사 포인트 누적 (+500p)", true);
+                updateMoneyUI(500);
+
+                const zone = document.getElementById(currentActiveZone);
+                zone.classList.add('solved');
+                
+                const targetImg = zone.querySelector('.evidence-bg-img');
+                if (targetImg) {
+                    targetImg.src = getStageImageSrc(currentStageIndex, 2);
+                }
+
+                autoProgressNextStage();
+            } else {
+                showToast("❌ 오답: 포인트가 차감됩니다. (-500p)", false);
+                updateMoneyUI(-500);
+            }
+        }
+
+        function submitFinalDeduction() {
+            const selectedRadio = document.querySelector('input[name="final-criminal"]:checked');
+            if(!selectedRadio) {
+                alert("⚖️ 용의자 목록을 확인하고 진범을 체크해 주세요!");
+                return;
+            }
+
+            if(selectedRadio.value === '이지우') {
+                updateMoneyUI(5000);
+                changeScene('scene-report');
+            } else {
+                alert("❌ 잘못된 추리입니다! 현장의 지문 흔적과 용의자 알리바이를 다시 조합해 보세요. (-1000p)");
+                updateMoneyUI(-1000);
+            }
+        }
+
+        function restartGame() {
+            currentActiveZone = null;
+            currentStageIndex = 0;
+            totalMoneyScore = 0;
+
+            document.getElementById('investigator-name').value = '';
+            const checkOption = document.querySelector('input[name="final-criminal"]:checked');
+            if(checkOption) checkOption.checked = false;
+
+            initializeAllImages();
+
+            const zones = ['A', 'B', 'C', 'D'];
+            zones.forEach(z => {
+                document.getElementById('zone-' + z).classList.remove('solved');
+            });
+
+            changeScene('scene-title');
+        }
+    </script>
+</body>
+</html>
